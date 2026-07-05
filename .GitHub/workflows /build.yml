@@ -1,0 +1,51 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Pillow
+        run: pip install pillow
+
+      - name: Convert PNG to ICO
+        run: |
+          python -c "
+          from PIL import Image
+          img = Image.open('icon-512.png').convert('RGBA')
+          img = img.resize((256, 256), Image.LANCZOS)
+          img.save('icon.ico', format='ICO')
+          print('icon.ico created successfully')
+          "
+
+      - name: Update package.json icon path
+        run: |
+          $content = Get-Content package.json -Raw
+          $content = $content -replace '"icon-512.png"', '"icon.ico"'
+          Set-Content package.json $content
+
+      - name: Build Windows EXE
+        run: npm run build:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: muujiza-lis-windows
+          path: dist/
