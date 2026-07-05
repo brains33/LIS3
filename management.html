@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="manifest.json">
+<title>User Management – AB DAWANAU MEDICAL LABORATORY SERVICES</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="lis-config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="offline_queue.js"></script>  <!-- before auth-guard.js -->
+<script src="auth-guard.js"></script>
+<link rel="stylesheet" href="management.css">
+  <script src="https://js.paystack.co/v1/inline.js"></script>
+</head>
+<body>
+
+<!-- Auth guard (provided by auth-guard.js loaded in <head>) -->
+<script>
+  const SUPABASE_URL      = window.LIS_CONFIG.SUPABASE_URL;
+  const SUPABASE_ANON_KEY = window.LIS_CONFIG.SUPABASE_ANON_KEY;
+
+  // checkAuth() and logoutUser() come from auth-guard.js
+  const currentSession = checkAuth(['admin', 'supervisor']);
+  window._currentSession = currentSession; // expose for management.js
+
+  // Build token-authenticated client — injects x-lis-token on every request
+  window._supabaseClient = window.buildAuthClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const db = window._supabaseClient;
+</script>
+
+<div class="topbar">
+  <div class="topbar-left"><div class="topbar-logo">🧬</div><div><div class="topbar-title">A.B DAWANAU LIS</div><div class="topbar-sub">Management Hub</div></div></div>
+  <div class="topbar-right"><div class="user-chip"><span class="role-tag" id="sessionRole">—</span><span class="name" id="sessionName">—</span></div><button class="logout-btn" onclick="logoutUser()">Sign Out</button></div>
+</div>
+
+<div class="container">
+  <div class="page-header"><h2>A.B DAWANAU Admin</h2><p>Manage staff accounts, track sample progress, review audit trail.</p></div>
+
+  <div class="page-tabs">
+    <button class="page-tab active" data-tab="users">👥 System Users</button>
+    <button class="page-tab" data-tab="tracking">📊 Sample Tracking</button>
+    <button class="page-tab" data-tab="audit">📜 Audit Trail</button>
+    <button class="page-tab" data-tab="analytics">🔬 Clinical Analytics</button>
+    <button class="page-tab" data-tab="finance">💰 Financial Report</button>
+    <button class="page-tab" data-tab="subscription">🔐 Subscription</button>
+  </div>
+
+  <!-- Users Tab -->
+  <div class="tab-panel active" id="tab-users">
+    <div class="stats" id="statsRow">
+      <div class="stat-card"><div class="val" id="statTotal">—</div><div class="lbl">Total Users</div></div>
+      <div class="stat-card"><div class="val" id="statActive">—</div><div class="lbl">Active</div></div>
+      <div class="stat-card"><div class="val" id="statAdmins">—</div><div class="lbl">Admins</div></div>
+      <div class="stat-card"><div class="val" id="statPatients">—</div><div class="lbl">Patients</div></div>
+    </div>
+    <div class="toolbar">
+      <div class="search-wrap"><input type="text" id="searchInput" placeholder="Search by name or username…"></div>
+      <select class="filter-select" id="roleFilter"><option value="">All Roles</option><option value="reception">Reception</option><option value="technologist">Technologist</option><option value="supervisor">Supervisor</option><option value="admin">Admin</option><option value="patient">Patient</option></select>
+      <button class="add-btn" id="addUserBtn">+ Add User</button>
+    </div>
+    <div class="table-wrap"><table><thead><tr><th>User</th><th>Username</th><th>Role</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody id="userTableBody"><tr class="loading-row"><td colspan="6"><span class="spinner-inline"></span>Loading users…</td></tr></tbody></table></div>
+  </div>
+
+  <!-- Sample Tracking Tab -->
+  <div class="tab-panel" id="tab-tracking">
+    <div class="stats">
+      <div class="stat-card"><div class="val" id="trackTotal">0</div><div class="lbl">Total Samples</div></div>
+      <div class="stat-card"><div class="val" id="trackRegistered">0</div><div class="lbl">Registered</div></div>
+      <div class="stat-card"><div class="val" id="trackCollected">0</div><div class="lbl">Collected</div></div>
+      <div class="stat-card"><div class="val" id="trackProcessing">0</div><div class="lbl">Processing</div></div>
+      <div class="stat-card"><div class="val" id="trackVerifying">0</div><div class="lbl">Verifying</div></div>
+      <div class="stat-card"><div class="val" id="trackReleased">0</div><div class="lbl">Released</div></div>
+    </div>
+    <div class="toolbar">
+      <div class="search-wrap"><input type="text" id="trackSearch" placeholder="Search by ID or patient…"></div>
+      <select class="filter-select" id="trackStatusFilter"><option value="all">All statuses</option><option value="Registered">Registered</option><option value="Collected">Collected</option><option value="Processing">Processing</option><option value="Verifying">Verifying</option><option value="Result Released">Released</option></select>
+      <button class="add-btn" id="trackRefreshBtn" style="background:#4b5563;">⟳ Refresh</button>
+    </div>
+    <div class="table-wrap">
+      <table style="min-width:700px;">
+        <thead><tr><th>Sample ID</th><th>Patient</th><th>Priority</th><th>Current Status</th><th>Progress</th><th>Released At</th></tr></thead>
+        <tbody id="trackTableBody"><tr class="loading-row"><td colspan="6"><span class="spinner-inline"></span>Loading samples…</td></tr></tbody>
+      </table>
+    </div>
+    <div style="margin-top:12px; padding:10px; background:#f0fdf4; border-radius:12px; font-size:0.7rem; color:#166534;"><i class="fas fa-info-circle"></i> Progress: <span class="step-mini completed"><span class="step-dot"></span><span class="step-label">Completed</span></span> → <span class="step-mini active"><span class="step-dot"></span><span class="step-label">Current</span></span> → <span class="step-mini"><span class="step-dot"></span><span class="step-label">Pending</span></span></div>
+  </div>
+
+  <!-- Analytics Tab -->
+  <div class="tab-panel" id="tab-analytics">
+    <div class="analytics-filter-bar">
+      <div class="analytics-filter-group">
+        <label class="analytics-filter-label">Date From</label>
+        <input type="date" id="analyticsDateFrom" class="filter-select" style="padding:9px 12px;font-size:.82rem;">
+      </div>
+      <div class="analytics-filter-group">
+        <label class="analytics-filter-label">Date To</label>
+        <input type="date" id="analyticsDateTo" class="filter-select" style="padding:9px 12px;font-size:.82rem;">
+      </div>
+      <div class="analytics-filter-group">
+        <label class="analytics-filter-label">Gender</label>
+        <select id="analyticsGender" class="filter-select">
+          <option value="all">All Genders</option>
+          <option value="Male">Male</option>
+          <option value="Female">Female</option>
+        </select>
+      </div>
+      <div class="analytics-filter-group" style="min-width:80px;max-width:100px;">
+        <label class="analytics-filter-label">Age Min</label>
+        <input type="number" id="analyticsAgeMin" class="filter-select" placeholder="0" min="0" max="120" style="padding:9px 10px;font-size:.82rem;width:100%;">
+      </div>
+      <div class="analytics-filter-group" style="min-width:80px;max-width:100px;">
+        <label class="analytics-filter-label">Age Max</label>
+        <input type="number" id="analyticsAgeMax" class="filter-select" placeholder="Any" min="0" max="120" style="padding:9px 10px;font-size:.82rem;width:100%;">
+      </div>
+      <div class="analytics-filter-group" style="min-width:160px;">
+        <label class="analytics-filter-label">Unit <span style="font-weight:400;font-size:.65rem;">(from Admin)</span></label>
+        <select id="analyticsUnitFilter" class="filter-select">
+          <option value="">All Units</option>
+        </select>
+      </div>
+      <div class="analytics-filter-group" style="min-width:160px;">
+        <label class="analytics-filter-label">Area / Locality <span style="font-weight:400;font-size:.65rem;">(prevalence)</span></label>
+        <select id="analyticsAreaFilter" class="filter-select">
+          <option value="">All Areas</option>
+        </select>
+      </div>
+      <div class="analytics-filter-group" style="flex:2;min-width:200px;">
+        <label class="analytics-filter-label">Analyse Test <span style="font-weight:400;font-size:.65rem;">(with results only)</span></label>
+        <select id="analyticsTestSelect" class="filter-select">
+          <option value="">— Select a test for deep dive —</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;align-self:flex-end;">
+        <button class="add-btn" onclick="window.renderAnalytics()">🔬 Run</button>
+        <button class="add-btn" id="analyticsClearBtn" style="background:#4b5563;">✕ Clear</button>
+        <button class="csv-btn" id="exportAnalyticsBtn" title="Generate a chart-based HTML analytics report (open in browser and Print → Save as PDF)">📊 Export Report</button>
+      </div>
+    </div>
+    <div id="analyticsContent">
+      <div class="analytics-empty">
+        <div style="font-size:2.5rem;margin-bottom:12px;">🔬</div>
+        <div style="font-weight:600;margin-bottom:6px;color:var(--slate);">Clinical Analytics</div>
+        <div style="font-size:.82rem;color:var(--muted);">Set filters above and click <strong>Run</strong> to explore patient data by age, gender &amp; test results.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Audit Tab -->
+  <div class="tab-panel" id="tab-audit">
+    <div class="audit-toolbar">
+      <div class="audit-search-wrap"><input type="text" id="auditSearch" placeholder="Search user, action, sample…"></div>
+      <select class="audit-filter-sel" id="auditActionFilter"><option value="">All actions</option><option value="login">Login</option><option value="Released">Released</option><option value="Returned to Tech">Returned to Tech</option><option value="Payment toggled">Payment toggled</option><option value="PDF Generated">PDF Generated</option><option value="QC Run">QC Run</option><option value="Deleted">Deleted</option></select>
+      <select class="audit-filter-sel" id="auditRoleFilter"><option value="">All roles</option><option value="admin">Admin</option><option value="supervisor">Supervisor</option><option value="technologist">Technologist</option><option value="reception">Reception</option><option value="patient">Patient</option></select>
+      <button class="audit-refresh-btn" id="auditRefreshBtn">↻ Refresh</button>
+      <span class="audit-count" id="auditCount"></span>
+    </div>
+    <div class="audit-wrap"><table><thead><tr><th>Timestamp</th><th>User (Role)</th><th>Action</th><th>Sample</th><th>Details</th></tr></thead><tbody id="auditTableBody"><tr><td colspan="5" style="text-align:center;padding:32px;"><span class="spinner-inline"></span>Loading audit log…</td></tr></tbody></table></div>
+  </div>
+
+  <!-- Finance Tab -->
+  <div class="tab-panel" id="tab-finance">
+    <div style="display:flex; gap:16px; margin-bottom:20px; align-items:flex-end; flex-wrap:wrap;">
+      <div><label style="display:block;font-size:.75rem;color:#6b7280;margin-bottom:4px;">Start Date</label><input type="date" id="financeStart" class="filter-select" style="padding:9px 12px;font-size:.82rem;"></div>
+      <div><label style="display:block;font-size:.75rem;color:#6b7280;margin-bottom:4px;">End Date</label><input type="date" id="financeEnd" class="filter-select" style="padding:9px 12px;font-size:.82rem;"></div>
+      <button class="add-btn" onclick="renderFinanceReport()">Apply Filter</button>
+      <button class="add-btn" style="background:#4b5563;" onclick="resetFinanceFilter()">Reset</button>
+      <button class="csv-btn" onclick="exportFinanceCSV()"><i class="fas fa-download"></i> Export CSV</button>
+    </div>
+    <div class="stats" id="financeStats"></div>
+    <div class="table-wrap" style="margin-top:20px;">
+      <table>
+        <thead><tr><th>Date</th><th>Total Revenue (₦)</th><th>Paid Amount (₦)</th><th>Outstanding (₦)</th><th>Samples</th></tr></thead>
+        <tbody id="financeTable"></tbody>
+      </table>
+    </div>
+  </div>
+
+
+  <!-- Subscription Tab -->
+  <div class="tab-panel" id="tab-subscription">
+
+    <!-- Status Card -->
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px;">
+      <div class="stat-card" id="subStatusCard">
+        <div class="val" id="subStatusVal" style="font-size:1.1rem;">—</div>
+        <div class="lbl">Subscription Status</div>
+      </div>
+      <div class="stat-card">
+        <div class="val" id="subDaysVal" style="font-size:1.1rem;">—</div>
+        <div class="lbl">Days Remaining</div>
+      </div>
+      <div class="stat-card">
+        <div class="val" id="subPlanVal" style="font-size:1.1rem;">—</div>
+        <div class="lbl">Current Plan</div>
+      </div>
+      <div class="stat-card">
+        <div class="val" id="subExpiryVal" style="font-size:1.1rem;">—</div>
+        <div class="lbl">Expiry Date</div>
+      </div>
+    </div>
+
+    <!-- Alert Banner -->
+    <div id="subAlertBanner" style="display:none; padding:14px 18px; border-radius:10px; margin-bottom:20px; font-size:.9rem; font-weight:600;"></div>
+
+    <!-- Renewal Options -->
+    <div style="background:var(--white); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:20px;">
+      <div style="font-weight:700; font-size:1rem; color:var(--slate); margin-bottom:16px;">🔄 Renew Subscription</div>
+      
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
+        <!-- Monthly Plan -->
+        <div id="planMonthly" onclick="selectPlan('monthly')" style="border:2px solid var(--border); border-radius:12px; padding:16px; cursor:pointer; transition:.2s;">
+          <div style="font-weight:700; font-size:.95rem; color:var(--slate);">Monthly</div>
+          <div style="font-size:1.4rem; font-weight:800; color:var(--green); margin:6px 0;">₦20,000</div>
+          <div style="font-size:.75rem; color:var(--muted);">30 days access</div>
+          <div style="font-size:.75rem; color:var(--muted);">Web URL access</div>
+        </div>
+        <!-- Yearly Plan -->
+        <div id="planYearly" onclick="selectPlan('yearly')" style="border:2px solid var(--border); border-radius:12px; padding:16px; cursor:pointer; transition:.2s;">
+          <div style="font-weight:700; font-size:.95rem; color:var(--slate);">Yearly</div>
+          <div style="font-size:1.4rem; font-weight:800; color:var(--green); margin:6px 0;">₦200,000</div>
+          <div style="font-size:.75rem; color:var(--muted);">365 days access</div>
+          <div style="font-size:.75rem; color:var(--muted);">Save ₦40,000</div>
+        </div>
+      </div>
+
+      <div id="subEmailRow" style="margin-bottom:12px; display:none;">
+        <label style="font-size:.8rem; color:var(--muted); display:block; margin-bottom:4px;">Email for payment receipt</label>
+        <input type="email" id="subEmail" placeholder="your@email.com" 
+          style="width:100%; padding:10px 14px; border:1.5px solid var(--border); border-radius:10px; font-size:.85rem; box-sizing:border-box;">
+      </div>
+
+      <button id="subPayBtn" onclick="initiateSubscriptionPayment()" 
+        style="display:none; width:100%; background:var(--green); color:#fff; border:none; padding:14px; border-radius:10px; font-size:.95rem; font-weight:700; cursor:pointer;">
+        💳 Pay Now
+      </button>
+    </div>
+
+    <!-- Payment History -->
+    <div style="background:var(--white); border:1px solid var(--border); border-radius:14px; padding:20px;">
+      <div style="font-weight:700; font-size:1rem; color:var(--slate); margin-bottom:12px;">📋 Payment History</div>
+      <div id="subHistoryTable" style="color:var(--muted); font-size:.85rem;">Loading...</div>
+    </div>
+
+  </div>
+
+</div><!-- /container -->
+
+<!-- Add/Edit User Modal -->
+<div class="modal-bg" id="userModal">
+  <div class="modal">
+    <h3 id="modalTitle">Add New User</h3>
+    <div class="modal-error" id="modalError"></div>
+    <div class="mfield"><label>Username <span style="color:var(--muted);font-size:.65rem;font-weight:400">(unique, no spaces)</span></label><input type="text" id="mUsername" placeholder="e.g. amara.okonkwo" autocomplete="off"></div>
+    <div class="mfield"><label>Role</label><select id="mRole"><option value="">Select role…</option><option value="reception">Reception</option><option value="technologist">Technologist</option><option value="supervisor">Supervisor</option><option value="admin">Admin</option><option value="patient">Patient Portal</option></select></div>
+    <div class="mfield" id="pwField"><label id="pwLabel">Password</label><input type="password" id="mPassword" placeholder="Min. 8 characters" autocomplete="new-password"><div class="pw-strength" id="pwStrength"><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div></div><div class="pw-hint">Min. 8 chars, include uppercase, number & symbol.</div></div>
+    <div class="modal-actions"><button class="btn-cancel" onclick="closeModal()">Cancel</button><button class="btn-save" id="saveUserBtn">Create User</button></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="management.js"></script>
+<script src="global.js"></script>
+
+</body>
+</html>

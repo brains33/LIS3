@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="manifest.json">
+<title>AB DAWANAU MEDICAL LABORATORY SERVICES – Result Entry</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="lis-config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+ <!-- before auth-guard.js -->
+
+<link rel="stylesheet" href="result_entry.css">
+</head>
+
+<body>
+<div class="app">
+
+  <!-- ── TOPBAR ────────────────────────────────────────── -->
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-icon"><i class="fas fa-flask"></i></div>
+      <div>
+        <div class="brand-text">AB DAWANAU MEDICAL LABORATORY SERVICES <span>LIS</span></div>
+        <div class="brand-sub">Result Entry</div>
+      </div>
+    </div>
+
+    <div class="topbar-right">
+      <div class="topbar-clock" id="clockDisplay"></div>
+      <div class="topbar-user">
+        <div class="user-avatar"><i class="fas fa-user" style="font-size:.6rem;"></i></div>
+        <span id="userDisplay"></span>
+      </div>
+      <button class="logout-btn" id="logoutBtn">
+        <i class="fas fa-sign-out-alt"></i> Logout
+      </button>
+    </div>
+  </div>
+
+  <!-- ── SAMPLES CARD ──────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-header-title">
+        <i class="fas fa-microscope"></i>
+        Samples Ready for Result Entry
+        <span id="sampleCountBadge"></span>
+      </div>
+
+      <div class="toolbar">
+        <div class="search-bar">
+          <i class="fas fa-search"></i>
+          <input type="text" id="sampleSearch" placeholder="Search ID, patient or OFFLINE-DRAFT-…">
+        </div>
+        <select id="priorityFilter" class="filter-sel">
+          <option value="all">All priorities</option>
+          <option value="STAT">STAT</option>
+          <option value="Urgent">Urgent</option>
+          <option value="Routine">Routine</option>
+        </select>
+        <button class="btn btn-secondary btn-sm" id="refreshBtn">
+          <i class="fas fa-sync-alt"></i> Refresh
+        </button>
+      </div>
+    </div>
+
+    <div class="card-body">
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Sample ID</th>
+              <th>Patient</th>
+              <th>Tests</th>
+              <th>Priority</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="samplesTable"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /.app -->
+
+<!-- ── RESULT ENTRY MODAL ────────────────────────────────── -->
+<div id="resultModal" class="overlay">
+  <div class="modal">
+
+    <div class="modal-head">
+      <div class="modal-head-left">
+        <div class="modal-title" id="modalTitle">Enter Results</div>
+        <div class="modal-subtitle" id="modalSubtitle"></div>
+      </div>
+      <button class="close-btn" id="closeModalBtn"><i class="fas fa-times"></i></button>
+    </div>
+
+    <div class="modal-body">
+      <div id="sampleInfo" class="sample-info-bar"></div>
+      <div id="testForms"></div>
+      <div class="coc-section-label">Chain of Custody</div>
+      <div id="cocTimeline" class="coc-timeline"></div>
+    </div>
+
+    <div id="readinessBar" style="display:none;"></div>
+
+    <div class="modal-foot">
+      <div style="flex:1; display:flex; align-items:center;">
+        <span id="autoSaveInd" style="font-size:0.72rem; color:var(--green); font-weight:600; opacity:0; transition:opacity .4s;">✓ Auto-saved</span>
+      </div>
+      <button class="btn btn-secondary" id="closeModalBtn2">Close</button>
+      <button class="btn btn-secondary" id="saveDraftBtn">
+        <i class="fas fa-save"></i> Save Draft
+      </button>
+      <button class="btn btn-danger" id="rejectSampleBtn" style="background:var(--red);color:white;">
+        <i class="fas fa-ban"></i> Reject Sample
+      </button>
+      <button class="btn btn-primary" id="markReadyBtn">
+        <i class="fas fa-check"></i> Mark My Tests Ready
+      </button>
+      <button class="btn btn-primary" id="sendVerifyBtn" style="display:none;">
+        <i class="fas fa-check-double"></i> Send All to Verify
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── REJECTION REASON MODAL ─────────────────────────────── -->
+<div id="rejectModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.55); align-items:center; justify-content:center; z-index:3000;">
+  <div style="background:white; border-radius:20px; max-width:440px; width:90%; padding:28px 28px 22px; box-shadow:0 16px 48px rgba(0,0,0,.18);">
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:18px;">
+      <div style="width:36px;height:36px;background:#fee2e2;border-radius:10px;display:flex;align-items:center;justify-content:center;">
+        <i class="fas fa-ban" style="color:#dc2626;font-size:0.95rem;"></i>
+      </div>
+      <div>
+        <div style="font-weight:700;font-size:1rem;color:#0f1f2e;">Reject Sample</div>
+        <div id="rejectModalSampleId" style="font-size:0.75rem;color:#607d8f;"></div>
+      </div>
+    </div>
+    <label style="font-size:0.82rem;font-weight:600;color:#2e4a5e;display:block;margin-bottom:6px;">Rejection Reason <span style="color:#dc2626;">*</span></label>
+    <textarea id="rejectionReasonInput" rows="3" maxlength="300"
+      placeholder="e.g. Haemolysed sample, insufficient volume, wrong container, clotted sample…"
+      style="width:100%;padding:10px 13px;border:1px solid #dce8ee;border-radius:12px;font-family:inherit;font-size:0.85rem;resize:vertical;outline:none;transition:border-color .15s;"
+      onfocus="this.style.borderColor='#dc2626'" onblur="this.style.borderColor='#dce8ee'"></textarea>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+      <button onclick="closeRejectModal()" style="padding:8px 18px;border-radius:40px;border:1px solid #dce8ee;background:white;font-size:0.82rem;font-weight:600;cursor:pointer;color:#607d8f;">Cancel</button>
+      <button onclick="confirmReject()" style="padding:8px 20px;border-radius:40px;border:none;background:#dc2626;color:white;font-size:0.82rem;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;">
+        <i class="fas fa-ban"></i> Confirm Rejection
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-stack" id="toastStack"></div>
+<script src="auth-guard.js"></script>
+<script src="offline_queue.js"></script>
+<script src="result_entry.js"></script>
+<script src="global.js"></script>
+</body>
+</html>

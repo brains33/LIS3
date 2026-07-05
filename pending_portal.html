@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A.B DAWANAU MEDICAL LABORATORY SERVICES – Patient Portal</title>
+<link rel="stylesheet" href="pending_portal.css">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="lis-config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="offline_queue.js"></script>
+<script src="auth-guard.js"></script>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <div class="brand-name">AB DAWANAU MEDICAL LABORATORY SERVICES – Patient Portal</div>
+    <div style="display:flex; align-items:center; gap:16px;">
+      <div class="topbar-clock" id="clockDisplay"></div>
+      <div class="topbar-user">
+        <span id="userDisplay"></span>
+        <button class="logout-btn" id="logoutBtn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <!-- Portal Tabs -->
+    <div style="display:flex; gap:8px; padding:16px 20px 0; border-bottom:2px solid var(--border);">
+      <button id="tabReleasedBtn" onclick="switchPortalTab('released')"
+        style="padding:8px 20px; border-radius:40px 40px 0 0; border:none; font-weight:600; font-size:0.85rem; cursor:pointer; background:var(--primary); color:#fff; transition:0.15s;">
+        <i class="fas fa-file-alt"></i> Released Results
+      </button>
+      <button id="tabRejectedBtn" onclick="switchPortalTab('rejected')"
+        style="padding:8px 20px; border-radius:40px 40px 0 0; border:none; font-weight:600; font-size:0.85rem; cursor:pointer; background:#f8fafb; color:var(--text2); transition:0.15s;">
+        <i class="fas fa-ban"></i> Rejected Tests <span id="rejectedBadge" style="display:none; background:#b91c1c; color:#fff; border-radius:20px; padding:1px 7px; font-size:0.7rem; margin-left:4px;"></span>
+      </button>
+    </div>
+
+    <!-- Released Results Tab -->
+    <div id="portalTabReleased">
+    <div class="card-header" style="justify-content:space-between;">
+      <span><i class="fas fa-file-alt"></i> Released Results</span>
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <span id="releasedCount" style="font-size:0.78rem; color:var(--text2); font-weight:500;"></span>
+        <div style="position:relative;">
+          <input type="text" id="portalSearch" class="form-input" placeholder="Search by ID, name, phone…"
+            style="padding-left:34px; min-width:220px; font-size:0.82rem;"
+            oninput="filterTable()">
+          <i class="fas fa-search" style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--text3); font-size:0.8rem; pointer-events:none;"></i>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="refreshBtn" onclick="loadAndRender()">
+          <i class="fas fa-sync-alt"></i> Refresh
+        </button>
+      </div>
+    </div>
+    <div class="card-body" style="padding:0;">
+      <div id="portalTableWrap" style="overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:0.82rem;">
+          <thead>
+            <tr style="background:#f8fafb; border-bottom:2px solid var(--border);">
+              <th style="padding:10px 14px; text-align:left; font-size:0.7rem; text-transform:uppercase; color:var(--text2);">Sample ID</th>
+              <th style="padding:10px 14px; text-align:left; font-size:0.7rem; text-transform:uppercase; color:var(--text2);">Patient</th>
+              <th style="padding:10px 14px; text-align:left; font-size:0.7rem; text-transform:uppercase; color:var(--text2);">Tests</th>
+              <th style="padding:10px 14px; text-align:left; font-size:0.7rem; text-transform:uppercase; color:var(--text2);">Collected</th>
+              <th style="padding:10px 14px; text-align:left; font-size:0.7rem; text-transform:uppercase; color:var(--text2);">Released</th>
+              <th style="padding:10px 14px; text-align:left; font-size:0.7rem; text-transform:uppercase; color:var(--text2);">Payment</th>
+              <th style="padding:10px 14px; text-align:left; font-size:0.7rem; text-transform:uppercase; color:var(--text2);">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="portalTableBody">
+            <tr><td colspan="7" style="padding:40px; text-align:center; color:var(--text2);">
+              <i class="fas fa-spinner fa-spin"></i> Loading released results…
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    </div><!-- end portalTabReleased -->
+
+    <!-- Rejected Tests Tab -->
+    <div id="portalTabRejected" style="display:none;">
+    <div class="card-header" style="justify-content:space-between;">
+      <span style="color:#b91c1c;"><i class="fas fa-ban"></i> Samples with Rejected Tests</span>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <span id="rejectedCount" style="font-size:0.78rem; color:var(--text2); font-weight:500;"></span>
+        <div style="position:relative;">
+          <input type="text" id="rejectedSearch" class="form-input" placeholder="Search by ID or name…"
+            style="padding-left:34px; min-width:200px; font-size:0.82rem;"
+            oninput="filterRejectedTable()">
+          <i class="fas fa-search" style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--text3); font-size:0.8rem; pointer-events:none;"></i>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="loadRejectedSamples()">
+          <i class="fas fa-sync-alt"></i> Refresh
+        </button>
+      </div>
+    </div>
+    <div class="card-body" style="padding:16px;">
+      <div style="background:#fff7ed; border:1px solid #fed7aa; border-radius:12px; padding:12px 16px; margin-bottom:16px; font-size:0.82rem; color:#92400e;">
+        <i class="fas fa-info-circle"></i> These are samples where one or more tests were rejected. Only the rejected test information is shown — no result data. Please visit the laboratory for recollection.
+      </div>
+      <div id="rejectedTableBody">
+        <div style="text-align:center; padding:40px; color:var(--text2);"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
+      </div>
+    </div>
+    </div><!-- end portalTabRejected -->
+
+  </div>
+
+  <!-- RESULT DETAIL PANEL — INSERTED HERE BY expandResult() -->
+  <div id="portalResultDetail" style="display:none;"></div>
+
+</div>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<script src="pending_portal.js"></script>
+<script src="global.js"></script>
+</body>
+</html>

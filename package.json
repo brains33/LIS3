@@ -1,0 +1,70 @@
+{
+  "name": "muujiza-lis",
+  "version": "2.0.0",
+  "description": "AB DAWANAU  Laboratory Information System",
+  "main": "main.js",
+  "author": {
+    "name": "MU'UJIZA DATA",
+    "email": "muujizadata@gmail.com"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build:win": "electron-builder --win --x64",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux",
+    "build:all": "electron-builder --win --mac --linux"
+  },
+  "devDependencies": {
+    "electron": "^29.0.0",
+    "electron-builder": "^24.0.0"
+  },
+  "build": {
+    "appId": "com.muujizadata.lis",
+    "productName": "MU'UJIZA LIS",
+    "copyright": "© 2023-2026 MU'UJIZA DATA. All rights reserved.",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "*.html",
+      "*.css",
+      "*.js",
+      "*.png",
+      "*.mp3",
+      "!node_modules/**"
+    ],
+    "extraFiles": [],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64", "ia32"] }
+      ],
+      "icon": "icon-512.png",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MU'UJIZA LIS",
+      "installerIcon": "icon-512.png",
+      "uninstallerIcon": "icon-512.png",
+      "deleteAppDataOnUninstall": false
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "icon-512.png",
+      "category": "public.app-category.medical",
+      "darkModeSupport": true
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "icon-512.png",
+      "category": "Science"
+    }
+  }
+}

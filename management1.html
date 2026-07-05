@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="manifest.json">
+<title>AB DAWANAU MEDICAL LABORATORY SERVICES – Management Hub</title>
+<link rel="stylesheet" href="management1.css">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="lis-config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="offline_queue.js"></script>  <!-- before auth-guard.js -->
+<script src="auth-guard.js"></script>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <div class="brand-name">AB DAWANAU MEDICAL LABORATORY SERVICES – Management</div>
+    <div style="display:flex; align-items:center; gap:16px;">
+      <div class="topbar-clock" id="clockDisplay"></div>
+      <div class="topbar-user">
+        <span id="userDisplay"></span>
+        <button class="logout-btn" id="logoutBtn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="all">All Samples</button>
+    <button class="tab-btn" data-tab="dashboard">Dashboard</button>
+    <button class="tab-btn" data-tab="qc">QC Monitor</button>
+    <button class="tab-btn" data-tab="verify">Verify &amp; Release</button>
+    <button class="tab-btn" data-tab="audit">Audit Trail</button>
+    <button class="tab-btn" data-tab="finance">Financial Report</button>
+    <button class="tab-btn" id="adminTabBtn" data-tab="admin" style="background:#ffe4b5; color:#7a5c00;">Admin (Units/Tests)</button>
+  </div>
+
+  <!-- All Samples -->
+  <div id="tab-all" class="tab-content active">
+    <div class="toolbar">
+      <div class="search-bar"><i class="fas fa-search" style="color:var(--text3);"></i><input type="text" id="allSearch" placeholder="Search ID, patient or OFFLINE-DRAFT-…"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <select id="allStatusFilter" class="filter-select">
+          <option value="all">All status</option>
+          <option>Collected</option><option>Processing</option>
+          <option>Verifying</option><option>Result Released</option><option>Rejected</option>
+        </select>
+        <select id="allPayFilter" class="filter-select">
+          <option value="all">All billing</option>
+          <option>Paid</option><option>Partial</option><option>Unpaid</option>
+        </select>
+        <button class="btn btn-secondary btn-sm" onclick="exportAllSamples()"><i class="fas fa-download"></i> CSV</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="table-wrap" style="overflow-x:auto;">
+        <table class="data-table" style="min-width:960px;">
+          <thead><tr><th>ID</th><th>Patient</th><th>Tests</th><th>Sample</th><th>Collected</th><th>Due</th><th>Priority</th><th>Status</th><th>Payment</th><th>Actions</th></tr></thead>
+          <tbody id="allSamplesTable"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="tab-dashboard" class="tab-content">
+    <div class="stats-row" id="statsRow"></div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+      <div class="card"><div class="card-header"><i class="fas fa-exclamation-triangle" style="color:var(--red-light);"></i> Critical Flags</div><div class="card-body" id="criticalList"></div></div>
+      <div class="card"><div class="card-header"><i class="fas fa-clock" style="color:var(--yellow-light);"></i> Overdue Samples</div><div class="card-body" id="overdueList"></div></div>
+    </div>
+  </div>
+
+  <!-- QC Monitor -->
+  <div id="tab-qc" class="tab-content">
+    <div class="card">
+      <div class="card-header"><i class="fas fa-vial"></i> Today's QC Run
+        <button class="btn btn-secondary btn-sm" onclick="runQC()" style="margin-left:auto;"><i class="fas fa-sync"></i> Run QC</button>
+      </div>
+      <div class="card-body" id="qcBody"><p style="color:var(--text2);">Click "Run QC" to simulate a control run.</p></div>
+    </div>
+    <div class="card"><div class="card-header"><i class="fas fa-list"></i> QC Log</div><div class="card-body" id="qcLog"></div></div>
+  </div>
+
+  <!-- Verify & Release -->
+  <div id="tab-verify" class="tab-content">
+    <div class="toolbar">
+      <div class="search-bar"><i class="fas fa-search" style="color:var(--text3);"></i><input type="text" id="verifySearch" placeholder="Search ID, patient or OFFLINE-DRAFT-…"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <select id="verifyStatusFilter" class="filter-select">
+          <option value="all" selected>All (Verifying + Released)</option>
+          <option value="Verifying">Awaiting Verification</option>
+          <option value="Result Released">Released</option>
+        </select>
+      </div>
+    </div>
+    <div class="card">
+      <div class="table-wrap" style="overflow-x:auto;">
+        <table class="data-table">
+          <thead><tr><th>ID</th><th>Patient</th><th>Tests</th><th>Technologist</th><th>Status</th><th>Released At</th><th>Actions</th></tr></thead>
+          <tbody id="verifyTable"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Audit Trail -->
+  <div id="tab-audit" class="tab-content">
+    <div class="card">
+      <div class="card-header"><i class="fas fa-history"></i> Full System Audit Log</div>
+      <div class="card-body">
+        <div class="table-wrap" style="max-height:600px; overflow-y:auto;">
+          <table class="data-table">
+            <thead><tr><th>Timestamp</th><th>User (Role)</th><th>Action</th><th>Sample</th><th>Details</th></tr></thead>
+            <tbody id="auditTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Financial Report -->
+  <div id="tab-finance" class="tab-content">
+    <div class="card">
+      <div class="card-header"><i class="fas fa-chart-line"></i> Financial Report</div>
+      <div class="card-body">
+        <div style="display:flex; gap:16px; margin-bottom:20px; align-items:flex-end; flex-wrap:wrap;">
+          <div class="form-group"><label class="form-label">Start Date</label><input type="date" id="financeStart" class="form-input"></div>
+          <div class="form-group"><label class="form-label">End Date</label><input type="date" id="financeEnd" class="form-input"></div>
+          <button class="btn btn-primary btn-sm" onclick="renderFinanceReport()">Apply Filter</button>
+          <button class="btn btn-secondary btn-sm" onclick="resetFinanceFilter()">Reset</button>
+          <button class="btn btn-secondary btn-sm" onclick="exportFinanceCSV()"><i class="fas fa-download"></i> Export CSV</button>
+        </div>
+        <div class="stats-row" id="financeStats"></div>
+        <div class="table-wrap" style="margin-top:20px; overflow-x:auto;">
+          <table class="data-table">
+            <thead><tr><th>Date</th><th>Total Revenue (NGN)</th><th>Paid Amount</th><th>Outstanding Balance</th><th>Samples</th></tr></thead>
+            <tbody id="financeTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Admin -->
+  <div id="tab-admin" class="tab-content">
+
+    <!-- Area Management -->
+    <div class="card admin-section" style="margin-bottom:20px;">
+      <div class="card-header"><i class="fas fa-map-marker-alt"></i> Manage Areas / Localities <small style="font-weight:400;color:#7a5c00;">(Admin only)</small></div>
+      <div class="card-body">
+        <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px; align-items:flex-end;">
+          <div class="form-group">
+            <label class="form-label">New Area Name</label>
+            <input type="text" id="newAreaName" class="form-input" placeholder="e.g., Tudun Wada, Kano Municipal" style="width:280px;">
+          </div>
+          <button class="btn btn-primary" id="addAreaBtn"><i class="fas fa-plus"></i> Add Area</button>
+        </div>
+        <div style="margin-bottom:10px;">
+          <input type="text" id="areaSearch" class="form-input" placeholder="🔍 Search areas..." style="max-width:300px;" oninput="filterAreasList()">
+        </div>
+        <div id="areasList"></div>
+      </div>
+    </div>
+
+    <div class="card admin-section">
+      <div class="card-header"><i class="fas fa-cog"></i> Manage Units &amp; Tests <small style="font-weight:400;color:#7a5c00;">(Admin only)</small></div>
+      <div class="card-body">
+        <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:24px; align-items:flex-end;">
+          <div class="form-group"><label class="form-label">New Unit Name</label><input type="text" id="newUnitName" class="form-input" placeholder="e.g., Endocrinology" style="width:240px;"></div>
+          <button class="btn btn-primary" id="addUnitBtn"><i class="fas fa-plus"></i> Add Unit</button>
+        </div>
+        <div id="unitsList"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Verify Modal -->
+<div id="verifyModal" class="overlay">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-title" id="verifyModalTitle" style="font-weight:700;">Supervisor Review</div>
+      <button class="close-btn" onclick="closeVerifyModal()"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" id="verifyModalBody"></div>
+    <div class="modal-foot">
+      <button class="btn btn-secondary" onclick="closeVerifyModal()">Cancel</button>
+      <button class="btn btn-danger"    onclick="returnToTech()"><i class="fas fa-undo"></i> Return to Tech</button>
+      <button class="btn btn-primary release-btn"   onclick="releaseResults()"><i class="fas fa-check"></i> Authorise &amp; Release</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<script src="management1.js"></script>
+<script src="global.js"></script>
+</body>
+</html>

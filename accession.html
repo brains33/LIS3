@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Allow Paystack scripts and its checkout iframe, Supabase API, CDN assets -->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src  'self' 'unsafe-inline' 'unsafe-eval'
+              https://js.paystack.co
+              https://cdn.jsdelivr.net
+              https://cdnjs.cloudflare.com;
+  style-src   'self' 'unsafe-inline'
+              https://fonts.googleapis.com
+              https://cdnjs.cloudflare.com;
+  font-src    'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com;
+  img-src     'self' data: blob:;
+  connect-src 'self'
+              https://*.supabase.co
+              https://api.paystack.co;
+  frame-src   https://checkout.paystack.com
+              https://js.paystack.co;
+">
+<link rel="manifest" href="manifest.json">
+<title>AB DAWANAU MEDICAL LABORATORY SERVICES – Accession</title>
+
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="accession.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="lis-config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://js.paystack.co/v1/inline.js"></script>
+<script src="auth-guard.js"></script>
+</head>
+<body>
+
+
+<script>
+  const SUPABASE_URL      = window.LIS_CONFIG.SUPABASE_URL;
+  const SUPABASE_ANON_KEY = window.LIS_CONFIG.SUPABASE_ANON_KEY;
+
+
+  window.currentSession = checkAuth(['reception', 'admin', 'supervisor']);
+
+
+  if (window.currentSession) {
+    try { localStorage.setItem('lis_session_cache', JSON.stringify(window.currentSession)); } catch(e) {}
+  } else if (!navigator.onLine) {
+    try {
+      const _cached = localStorage.getItem('lis_session_cache');
+      if (_cached) window.currentSession = JSON.parse(_cached);
+    } catch(e) {}
+  }
+
+  // Build token-authenticated client — injects x-lis-token on every request
+  window._supabaseClient = window.buildAuthClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const db = window._supabaseClient;
+</script>
+
+<div class="app">
+  <div class="topbar">
+    <div class="brand-name">AB DAWANAU MEDICAL LABORATORY SERVICES – Accession</div>
+    <div style="display:flex; align-items:center; gap:16px;">
+      <div class="topbar-clock" id="clockDisplay"></div>
+      <div class="topbar-user">
+        <span id="userDisplay"></span>
+        <button class="logout-btn" onclick="logoutUser()"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Section navbar ── -->
+  <nav class="section-nav">
+    <a href="#section-register"><i class="fas fa-user-plus"></i> Register Sample</a>
+    <a href="#section-settle" class="nav-settle"><i class="fas fa-wallet"></i> Settle Outstanding Balance</a>
+    <a href="#section-rejected" class="nav-rejected"><i class="fas fa-ban"></i> Rejected Samples</a>
+  </nav>
+
+  <!-- Patient Information -->
+  <div id="section-register" class="card">
+    <div class="card-header"><i class="fas fa-user-plus"></i> Patient Information</div>
+    <div class="card-body">
+      <div class="form-grid">
+        <div class="form-group" style="grid-column:span 2;">
+          <label class="form-label">Full Name *</label>
+          <input type="text" class="form-input" id="f-name" autocomplete="off">
+        </div>
+        <div class="form-group"><label class="form-label">Age</label><input type="number" class="form-input" id="f-age" min="0" max="150"></div>
+        <div class="form-group"><label class="form-label">Gender</label>
+          <select class="form-select" id="f-gender">
+            <option>Male</option><option>Female</option><option>Other</option>
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Phone</label><input type="tel" class="form-input" id="f-phone"></div>
+        <div class="form-group"><label class="form-label">ID / File No.</label><input type="text" class="form-input" id="f-nid"></div>
+        <div class="form-group" style="grid-column:span 2;">
+          <label class="form-label">Area / Locality</label>
+          <div style="display:flex; gap:8px;">
+            <input type="text" class="form-input" id="f-area-search" placeholder="🔍 Type to search area..." autocomplete="off" oninput="filterAreaDropdown()" style="flex:1;">
+            <select class="form-select" id="f-area" style="flex:2;">
+              <option value="">— Select Area —</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Clinical & Sample -->
+  <div class="card">
+    <div class="card-header"><i class="fas fa-stethoscope"></i> Clinical &amp; Sample</div>
+    <div class="card-body">
+      <div class="form-grid">
+        <div class="form-group"><label class="form-label">Clinician</label><input type="text" class="form-input" id="f-clinician"></div>
+        <div class="form-group"><label class="form-label">Clinical Diagnosis</label><textarea class="form-textarea" id="f-history" rows="2"></textarea></div>
+        <div class="form-group"><label class="form-label">Priority</label>
+          <select class="form-select" id="f-priority">
+            <option>Routine</option><option>Urgent</option><option>STAT</option>
+          </select>
+        </div>
+
+        <div class="form-group"><label class="form-label">Collection Date</label><input type="date" class="form-input" id="f-collDate"></div>
+        <div class="form-group"><label class="form-label">Collection Time</label><input type="time" class="form-input" id="f-collTime"></div>
+        <div class="form-group"><label class="form-label">Due Date</label><input type="date" class="form-input" id="f-due"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Test Requests -->
+  <div class="card">
+    <div class="card-header"><i class="fas fa-vials"></i> Test Requests</div>
+    <div class="card-body">
+      <div class="no-tests-notice" id="noTestsNotice">
+        <i class="fas fa-exclamation-triangle"></i>
+        No tests configured. Ask an Admin to add units and tests.
+      </div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">Unit</label>
+          <select class="form-select" id="f-unit"></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Test</label>
+          <select class="form-select" id="f-test"></select>
+        </div>
+        <div class="form-group" style="justify-content:flex-end;">
+          <label class="form-label">&nbsp;</label>
+          <button class="btn btn-secondary" id="addTestBtn"><i class="fas fa-plus"></i> Add Test</button>
+        </div>
+      </div>
+      <div id="testCart" class="test-cart">
+        <span style="color:var(--text3);">No tests added yet.</span>
+      </div>
+      <!-- Sample Collection Summary -->
+      <div id="sampleSummary" style="margin-top:14px;display:none;"></div>
+    </div>
+  </div>
+
+  <!-- Payment -->
+  <div class="card">
+    <div class="card-header"><i class="fas fa-credit-card"></i> Payment &amp; Billing</div>
+    <div class="card-body">
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">Payment Mode</label>
+          <select class="form-select" id="f-paymode" onchange="handlePaymodeChange()">
+            <option value="Cash">Cash</option>
+            <option value="POS">POS (Card Terminal)</option>
+            <option value="Bank Transfer">Bank Transfer</option>
+            <option value="Paystack">💳 Paystack (Online)</option>
+            <option value="NHIS">NHIS</option>
+            <option value="Insurance">Insurance / HMO</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Insurance / HMO No. (if applicable)</label>
+          <input type="text" class="form-input" id="f-insurance">
+        </div>
+        <!-- Patient email shown only when Paystack is selected -->
+        <div class="form-group" id="paystackEmailGroup" style="display:none;">
+          <label class="form-label">Patient Email <span style="color:var(--text3);font-weight:400;">(for Paystack receipt)</span></label>
+          <input type="email" class="form-input" id="f-patient-email" placeholder="patient@example.com or leave blank">
+        </div>
+      </div>
+      <div class="payment-summary">
+        <div class="payment-line"><strong>Total Amount:</strong> <span id="totalAmount">0.00</span> NGN</div>
+        <div class="form-group" id="manualPaidGroup" style="margin:8px 0;">
+          <label class="form-label">Amount Paid (NGN)</label>
+          <input type="number" step="0.01" min="0" class="form-input" id="amountPaid" value="0">
+        </div>
+        <div class="payment-line"><strong>Balance Due:</strong> <span id="balanceDue">0.00</span> NGN</div>
+        <div class="payment-line" style="margin-top:8px;">
+          <strong>Payment Status:</strong>
+          <span id="payStatusBadge" class="pay-badge pay-unpaid">Unpaid</span>
+        </div>
+        <!-- Paystack notice -->
+        <div id="paystackNotice" style="display:none; margin-top:12px; padding:10px 14px; background:#fff9ec; border:1px solid #fde68a; border-radius:12px; font-size:0.8rem; color:#92400e;">
+          <i class="fas fa-info-circle"></i>
+          Sample will be saved first, then Paystack checkout will open. Payment status auto-updates on success.
+        </div>
+        <div class="payment-line" style="font-size:0.75rem; color:var(--text2);">Receipt number generated on registration.</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex; justify-content:flex-end; gap:12px; margin-bottom:20px;">
+    <button class="btn btn-secondary" id="clearBtn"><i class="fas fa-times"></i> Clear Form</button>
+    <button class="btn btn-primary" id="registerBtn">
+      <div class="spinner"></div>
+      <span class="btn-label" id="registerBtnLabel"><i class="fas fa-syringe"></i> Register &amp; Print Receipt</span>
+    </button>
+  </div>
+
+  <!-- ── Balance Settlement Panel ──────────────────────────────────── -->
+  <div id="section-settle" class="card" style="border:2px dashed var(--border); background:#fafcff; margin-bottom:24px;">
+    <div class="card-header" style="background:linear-gradient(135deg,#f0f7f3,#e8f4ed); cursor:pointer;" onclick="toggleSettlePanel()">
+      <i class="fas fa-hand-holding-usd" style="color:var(--primary);"></i>
+      <span style="color:var(--primary); font-weight:700;">Settle Outstanding Balance</span>
+      <span style="margin-left:auto; font-size:0.78rem; color:var(--text2);">For patients with existing Unpaid / Partial invoices</span>
+      <i class="fas fa-chevron-down" id="settlePanelChevron" style="margin-left:8px; color:var(--text2); transition:0.2s;"></i>
+    </div>
+    <div class="card-body" id="settlePanelBody" style="display:none;">
+      <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-bottom:16px;">
+        <div class="form-group" style="flex:1; min-width:160px;">
+          <label class="form-label">Sample ID</label>
+          <input type="text" class="form-input" id="settle-sample-id" placeholder="e.g. A.B-42 or just 42">
+        </div>
+        <button class="btn btn-secondary" id="settleLookupBtn" onclick="lookupSampleBalance()">
+          <i class="fas fa-search"></i> Look Up
+        </button>
+      </div>
+      <div id="settleResultBox" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- ── Rejected Samples Panel (Needs Recollection) ──────────────────── -->
+  <div id="section-rejected" class="card rejected-card" style="margin-bottom:24px;">
+    <div class="card-header" style="justify-content:space-between; flex-wrap:wrap; gap:10px;">
+      <span><i class="fas fa-ban"></i> Rejected Samples – Needs Recollection</span>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <div style="position:relative;">
+          <i class="fas fa-search" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#b91c1c; font-size:0.8rem; pointer-events:none;"></i>
+          <input
+            type="text"
+            id="rejectedSearch"
+            placeholder="Search patient, ID, test…"
+            oninput="filterRejectedPanel(this.value)"
+            style="padding:6px 12px 6px 30px; border:1.5px solid #fca5a5; border-radius:20px; font-size:0.82rem; background:#fff8f8; color:#374151; outline:none; width:210px; transition:border-color .2s;"
+            onfocus="this.style.borderColor='#b91c1c'"
+            onblur="this.style.borderColor='#fca5a5'"
+          >
+        </div>
+        <button class="refresh-rej-btn" onclick="loadRejectedSamples()"><i class="fas fa-sync-alt"></i> Refresh</button>
+      </div>
+    </div>
+    <div class="card-body" id="rejectedPanelBody">
+      <div style="text-align:center; padding:20px; color:var(--text2);">
+        <i class="fas fa-spinner fa-pulse"></i> Loading rejected samples...
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Receipt Modal -->
+<div id="labelModal" class="overlay">
+  <div class="modal-sm" id="labelContent"></div>
+</div>
+
+<div class="toast-stack" id="toastStack"></div>
+
+
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+</script>
+
+<script src="offline_queue.js"></script>
+<script src="accession.js"></script>
+<script src="global.js"></script>
+</body>
+</html>
