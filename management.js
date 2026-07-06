@@ -510,7 +510,7 @@ async function exportFinanceCSV() {
 
 // No hardcoded keys — Paystack public key fetched from edge function
 let PAYSTACK_PUBLIC_KEY = null;
-const PLAN_PRICES = { monthly: 20000, yearly: 200000 };
+const PLAN_PRICES = { monthly: 21500, yearly: 203000 };
 const PLAN_DAYS   = { monthly: 30,    yearly: 365    };
 
 let _selectedPlan = null;

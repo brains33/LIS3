@@ -26,8 +26,8 @@ window.LIS_CONFIG = {
 
     // ── Subscription Plans ──────────────────────────────────────
     PLANS: {
-        monthly: { price: 20000,  days: 30,  label: 'Monthly' },
-        yearly:  { price: 200000, days: 365, label: 'Yearly'  },
+        monthly: { price: 21500,  days: 30,  label: 'Monthly' },
+        yearly:  { price: 203000, days: 365, label: 'Yearly'  },
     },
 
 };
