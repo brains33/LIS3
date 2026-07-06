@@ -683,11 +683,18 @@ async function initiateSubscriptionPayment() {
                 days:       PLAN_DAYS[_selectedPlan],
                 amount_ngn: amount,
             },
-            callback: async function(response) {
+            callback: function(response) {
+                // Paystack callback must be sync — call async verify internally
                 btn.innerText = '⏳ Verifying payment...';
-                await verifySubscriptionPayment(response.reference, _selectedPlan, amount, email);
-                btn.disabled = false;
-                btn.innerText = `💳 Pay ₦${amount.toLocaleString()} — ${_selectedPlan}`;
+                verifySubscriptionPayment(response.reference, _selectedPlan, amount, email)
+                    .then(function() {
+                        btn.disabled = false;
+                        btn.innerText = `💳 Pay ₦${amount.toLocaleString()} — ${_selectedPlan}`;
+                    })
+                    .catch(function(err) {
+                        btn.disabled = false;
+                        btn.innerText = `💳 Pay ₦${amount.toLocaleString()} — ${_selectedPlan}`;
+                    });
             },
             onClose: function() {
                 btn.disabled = false;
