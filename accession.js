@@ -3,17 +3,189 @@
   // --------------------------------------------------------------
   //  GLOBALS & INIT (same as inline script)
   // --------------------------------------------------------------
-  const SUPABASE_URL = window.LIS_CONFIG.SUPABASE_URL;
-  
-  
-  
-  const SUPABASE_ANON_KEY = window.LIS_CONFIG.SUPABASE_ANON_KEY;
-  
+  const SUPABASE_URL = 'https://npdopywxemtwzvpummsn.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZG9weXd4ZW10d3p2cHVtbXNuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk4NzY0MjksImV4cCI6MjA5NTQ1MjQyOX0.Mo5LfGdfSiHL6QHsPOaGkDmeaIRDqZTe8MGwz_6ou1c';
   const PAYSTACK_PUBLIC_KEY = 'pk_test_8564df5226f404c1952b77183cc611d283be1a0c';
 
   // Auth session from auth-guard.js
   const currentSession = window.currentSession || { name: 'Reception', role: 'reception' };
   const db = window._supabaseClient;    // token-authenticated client
+
+  // --------------------------------------------------------------
+  //  HOSPITAL NUMBER LOOKUP (links samples back to patient_registry
+  //  so doctor-consultation.js can later find results by hosp. no.)
+  // --------------------------------------------------------------
+  let _linkedPatient = null; // { hospital_number, name, age, gender, phone } once a match is picked
+  let _pulledLabRequestIds = []; // lab_requests.id values auto-added into this cart, marked fulfilled on save
+  let _hospnumDebounce = null;
+
+  function _initHospnumSearch() {
+    const input = document.getElementById('f-hospnum');
+    const resultsBox = document.getElementById('hospnum-results');
+    const statusEl = document.getElementById('hospnum-status');
+    if (!input || !resultsBox) return;
+
+    input.addEventListener('input', () => {
+      _linkedPatient = null; // any manual edit invalidates a prior match
+      _pulledLabRequestIds = []; // don't mark requests fulfilled if the link was abandoned
+      if (statusEl) statusEl.textContent = '';
+      clearTimeout(_hospnumDebounce);
+      const q = input.value.trim();
+      if (q.length < 2) { resultsBox.style.display = 'none'; resultsBox.innerHTML = ''; return; }
+      _hospnumDebounce = setTimeout(() => _searchHospnum(q), 300);
+    });
+
+    input.addEventListener('blur', () => {
+      // small delay so a click on a result registers before the box hides
+      setTimeout(() => { resultsBox.style.display = 'none'; }, 150);
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!resultsBox.contains(e.target) && e.target !== input) resultsBox.style.display = 'none';
+    });
+  }
+
+  async function _searchHospnum(q) {
+    const resultsBox = document.getElementById('hospnum-results');
+    const statusEl = document.getElementById('hospnum-status');
+    if (!db || !resultsBox) return;
+    try {
+      const { data, error } = await db
+        .from('patient_registry')
+        .select('hospital_number, surname, first_name, middle_name, age, gender, phone, date_of_birth')
+        .or(`hospital_number.ilike.%${q}%,surname.ilike.%${q}%,first_name.ilike.%${q}%`)
+        .limit(8);
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        resultsBox.innerHTML = `<div style="padding:8px 10px; color:var(--muted,#888); font-size:13px;">No match — will register as walk-in with this as a free-text ID</div>`;
+        resultsBox.style.display = 'block';
+        return;
+      }
+
+      resultsBox.innerHTML = data.map(p => {
+        const fullName = [p.surname, p.first_name, p.middle_name].filter(Boolean).join(' ');
+        return `<div class="hospnum-result-row" data-hn="${esc(p.hospital_number)}"
+                     style="padding:8px 10px; cursor:pointer; border-bottom:1px solid #f0f0f0; font-size:13px;">
+                  <strong>${esc(p.hospital_number)}</strong> — ${esc(fullName)}
+                  <span style="color:var(--muted,#888);">${p.age ? ` · ${p.age}y` : ''}${p.gender ? ` · ${esc(p.gender)}` : ''}</span>
+                </div>`;
+      }).join('');
+      resultsBox.style.display = 'block';
+
+      resultsBox.querySelectorAll('.hospnum-result-row').forEach((row, idx) => {
+        row.addEventListener('mouseenter', () => row.style.background = '#f5f5f5');
+        row.addEventListener('mouseleave', () => row.style.background = '#fff');
+        // mousedown fires BEFORE the input's blur event, so it can never lose
+        // the race against the blur handler's setTimeout that hides this
+        // dropdown. Plain 'click' meant on slower/touch devices the row could
+        // already be display:none by the time click fired, silently dropping
+        // the selection — so patient details AND pending lab_requests never
+        // got pulled in.
+        row.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          _pickHospnumMatch(data[idx]);
+        });
+      });
+    } catch (err) {
+      console.error('[AC] hospnum search failed', err);
+      if (statusEl) statusEl.textContent = 'Search failed — you can still type a manual ID.';
+    }
+  }
+
+  function _findUnitForTest(testName) {
+    for (const [unit, tests] of Object.entries(testDefinitions.units)) {
+      if (tests.includes(testName)) return unit;
+    }
+    return null;
+  }
+
+  async function _autoAddPendingLabRequests(hospitalNumber) {
+    if (!db || !hospitalNumber) return;
+    // Guard against test_definitions still loading on a slow connection
+    if (Object.keys(testDefinitions.units).length === 0) {
+      await new Promise(r => setTimeout(r, 800));
+    }
+    try {
+      const { data: requests, error } = await db
+        .from('lab_requests')
+        .select('id, urgency, clinical_notes, lab_request_tests(test_name)')
+        .eq('hospital_number', hospitalNumber)
+        .eq('status', 'pending');
+      if (error) throw error;
+      if (!requests || requests.length === 0) return;
+
+      let added = 0, skipped = [];
+      const fulfilledRequestIds = new Set();
+      requests.forEach(r => {
+        (r.lab_request_tests || []).forEach(t => {
+          const testName = t.test_name;
+          const unit = _findUnitForTest(testName);
+          if (!unit) { skipped.push(testName); return; }
+          if (tempTests.find(x => x.unit_name === unit && x.test_name === testName)) { fulfilledRequestIds.add(r.id); return; } // already in cart, still counts as fulfilled
+          const testType = testDefinitions.testTypes[testName] || 'simple';
+          const sampleType = testDefinitions.sampleTypes[testName] || null;
+          const tube = testDefinitions.tubes[testName] || null;
+          tempTests.push({
+            unit_name: unit, test_name: testName, test_type: testType,
+            sample_type: sampleType, tube: tube,
+            result: '', result_json: null, tech_name: '', status: 'Collected', sort_order: tempTests.length
+          });
+          added++;
+          fulfilledRequestIds.add(r.id);
+        });
+      });
+      _pulledLabRequestIds = [...new Set([..._pulledLabRequestIds, ...fulfilledRequestIds])];
+
+      if (added > 0) { renderCart(); updateSampleSummary(); }
+
+      // Carry the doctor's urgency/notes into the accession form if set and not already filled
+      const firstReq = requests[0];
+      const priorityEl = document.getElementById('f-priority');
+      if (priorityEl && firstReq.urgency) {
+        const urgencyMap = { routine: 'Routine', urgent: 'Urgent', stat: 'STAT' };
+        const mapped = urgencyMap[(firstReq.urgency || '').toLowerCase()];
+        if (mapped) priorityEl.value = mapped;
+      }
+      const historyEl = document.getElementById('f-history');
+      if (historyEl && !historyEl.value.trim() && firstReq.clinical_notes) {
+        historyEl.value = firstReq.clinical_notes;
+      }
+
+      const statusEl = document.getElementById('hospnum-status');
+      if (statusEl) {
+        let msg = `✓ Linked. ${added} pending doctor-ordered test${added===1?'':'s'} auto-added to cart.`;
+        if (skipped.length > 0) msg += ` (${skipped.length} unmatched: ${skipped.join(', ')} — add manually)`;
+        statusEl.textContent = msg;
+      }
+      if (added > 0) toast(`${added} doctor-ordered test${added===1?'':'s'} auto-added`, 'success');
+      if (skipped.length > 0) toast(`Could not auto-match: ${skipped.join(', ')} — please add manually`, 'warn');
+    } catch (err) {
+      console.error('[AC] auto-add pending lab_requests failed', err);
+    }
+  }
+
+  function _pickHospnumMatch(p) {
+    const fullName = [p.surname, p.first_name, p.middle_name].filter(Boolean).join(' ');
+    document.getElementById('f-hospnum').value = p.hospital_number;
+    document.getElementById('f-name').value = fullName;
+    if (p.age) document.getElementById('f-age').value = p.age;
+    if (p.gender) document.getElementById('f-gender').value = p.gender;
+    if (p.phone) document.getElementById('f-phone').value = p.phone;
+    document.getElementById('f-name')?.classList.remove('required-empty');
+
+    _linkedPatient = { hospital_number: p.hospital_number, name: fullName, age: p.age, gender: p.gender, phone: p.phone };
+
+    const statusEl = document.getElementById('hospnum-status');
+    if (statusEl) statusEl.textContent = `✓ Linked. Checking for pending doctor-ordered tests…`;
+    const resultsBox = document.getElementById('hospnum-results');
+    if (resultsBox) resultsBox.style.display = 'none';
+
+    _autoAddPendingLabRequests(p.hospital_number);
+  }
+
+  document.addEventListener('DOMContentLoaded', _initHospnumSearch);
+  if (document.readyState !== 'loading') _initHospnumSearch();
 
   // --------------------------------------------------------------
   //  SERVER-SIDE PAYSTACK VERIFICATION
@@ -283,7 +455,7 @@
       patient: name, age: parseInt(document.getElementById('f-age')?.value) || null,
       gender: document.getElementById('f-gender')?.value || 'Male',
       phone: document.getElementById('f-phone')?.value.trim() || null,
-      nid: document.getElementById('f-nid')?.value.trim() || null,
+      hospital_number: _linkedPatient?.hospital_number || document.getElementById('f-hospnum')?.value.trim() || null,
       area: document.getElementById('f-area')?.value.trim() || null,
       clinician: document.getElementById('f-clinician')?.value.trim() || null,
       history: document.getElementById('f-history')?.value.trim() || null,
@@ -391,14 +563,22 @@
           actor_name: null, occurred_at: now.toISOString() }
       ]);
 
+      // Mark any doctor-ordered lab_requests that fed this sample as fulfilled,
+      // so re-searching this patient later doesn't auto-add the same tests again.
+      if (_pulledLabRequestIds.length > 0) {
+        await db.from('lab_requests')
+          .update({ status: 'fulfilled', updated_at: now.toISOString() })
+          .in('id', _pulledLabRequestIds);
+      }
+
       await addAudit('Sample Registered', sampleId, `${tempTests.length} test(s) | Total: ${total} NGN | Mode: ${paymode} | Status: ${paystatus}`);
 
-      toast(`A.B-${sampleId} registered ✓`);
+      toast(`MU-${sampleId} registered ✓`);
 
       if (isPaystack && total > 0) {
         if (btn) { btn.classList.remove('loading'); btn.disabled = false; }
         const patientEmail = document.getElementById('f-patient-email')?.value.trim() || (`patient${sampleId}@muujiza-lab.com`);
-        const paystackRef = `AB-${sampleId}-${Date.now()}`;
+        const paystackRef = `MU-${sampleId}-${Date.now()}`;
         window._pendingPaystack = {
           sampleId, receiptNo: paystackRef, patient: name, priority: sampleRow.priority,
           tests: [...tempTests], totalAmount: total, paymode
@@ -407,7 +587,7 @@
           key: PAYSTACK_PUBLIC_KEY, email: patientEmail, amount: Math.round(total * 100),
           currency: 'NGN', ref: paystackRef,
           metadata: { custom_fields: [
-            { display_name: 'Sample ID', variable_name: 'sample_id', value: 'A.B-' + sampleId },
+            { display_name: 'Sample ID', variable_name: 'sample_id', value: 'MU-' + sampleId },
             { display_name: 'Patient', variable_name: 'patient_name', value: name },
             { display_name: 'Registered By', variable_name: 'registered_by', value: currentSession.name }
           ] },
@@ -472,7 +652,7 @@
       purpose: 'registration'
     });
     if (!result.ok) {
-      toast(`Payment verification failed: ${result.error}. Sample A.B-${ctx.sampleId} remains Unpaid — use "Settle Balance" once resolved. Ref: ${response.reference}`, 'error');
+      toast(`Payment verification failed: ${result.error}. Sample MU-${ctx.sampleId} remains Unpaid — use "Settle Balance" once resolved. Ref: ${response.reference}`, 'error');
       clearForm();
       return;
     }
@@ -491,9 +671,12 @@
   //  CLEAR FORM
   // --------------------------------------------------------------
   function clearForm() {
-    ['f-name','f-phone','f-nid','f-clinician','f-history','f-insurance','f-patient-email','f-area-search'].forEach(id => {
+    ['f-name','f-phone','f-hospnum','f-clinician','f-history','f-insurance','f-patient-email','f-area-search'].forEach(id => {
       const el = document.getElementById(id); if (el) el.value = '';
     });
+    _linkedPatient = null;
+    _pulledLabRequestIds = [];
+    const resultsEl = document.getElementById('hospnum-results'); if (resultsEl) resultsEl.style.display = 'none';
     const areaEl = document.getElementById('f-area'); if (areaEl) areaEl.value = '';
     populateAreaSelect(_allAreas);
     document.getElementById('f-name')?.classList.remove('required-empty');
@@ -546,7 +729,7 @@
 
     const box = document.getElementById('settleResultBox');
     box.style.display = 'block';
-    box.innerHTML = `<div style="padding:16px;text-align:center;"><i class="fas fa-spinner fa-spin"></i> Looking up A.B-${numericId}…</div>`;
+    box.innerHTML = `<div style="padding:16px;text-align:center;"><i class="fas fa-spinner fa-spin"></i> Looking up MU-${numericId}…</div>`;
 
     try {
       const { data, error } = await db.from('samples')
@@ -555,7 +738,7 @@
       if (error || !data) throw new Error('Not found');
 
       if (data.pay_status === 'Paid') {
-        box.innerHTML = `<div style="padding:14px;background:#dcfce7;border-radius:14px;">✓ A.B-${numericId} — ${esc(data.patient)} — already fully paid.</div>`;
+        box.innerHTML = `<div style="padding:14px;background:#dcfce7;border-radius:14px;">✓ MU-${numericId} — ${esc(data.patient)} — already fully paid.</div>`;
         return;
       }
 
@@ -566,7 +749,7 @@
       box.innerHTML = `
         <div style="border:1.5px solid var(--border);border-radius:18px;overflow:hidden;">
           <div style="padding:14px 18px;background:#f8fafb;border-bottom:1px solid var(--border);">
-            <div><strong>A.B-${numericId} — ${esc(data.patient)}</strong></div>
+            <div><strong>MU-${numericId} — ${esc(data.patient)}</strong></div>
             <div>Status: <span class="pay-badge ${data.pay_status==='Partial'?'pay-partial':'pay-unpaid'}">${esc(data.pay_status)}</span></div>
           </div>
           <div style="padding:16px 18px;">
@@ -616,7 +799,7 @@
         if (!checkErr && liveRow && liveRow.pay_status === 'Paid') {
           document.getElementById('settleResultBox').innerHTML =
             `<div style="padding:14px;background:#dcfce7;border-radius:14px;">
-               ✓ A.B-${sampleId} — ${esc(patient)} — has already been fully paid.
+               ✓ MU-${sampleId} — ${esc(patient)} — has already been fully paid.
              </div>`;
           document.getElementById('settle-sample-id').value = '';
           toast('Already paid — no action needed', 'warn');
@@ -637,14 +820,14 @@
     // ─────────────────────────────────────────────────────────────────────
 
     if (_settleMode === 'Paystack') {
-      const paystackRef = `AB-${sampleId}-BAL-${Date.now()}`;
+      const paystackRef = `MU-${sampleId}-BAL-${Date.now()}`;
       const email = `patient${sampleId}@muujiza-lab.com`;
       window._pendingSettle = { sampleId, balance, total, patient };
       const handler = PaystackPop.setup({
         key: PAYSTACK_PUBLIC_KEY, email: email, amount: Math.round(balance * 100),
         currency: 'NGN', ref: paystackRef,
         metadata: { custom_fields: [
-          { display_name: 'Sample ID', variable_name: 'sample_id', value: 'A.B-' + sampleId },
+          { display_name: 'Sample ID', variable_name: 'sample_id', value: 'MU-' + sampleId },
           { display_name: 'Patient', variable_name: 'patient_name', value: patient },
           { display_name: 'Type', variable_name: 'type', value: 'Balance Settlement' }
         ] },
@@ -672,14 +855,14 @@
     });
 
     if (!result.ok) {
-      toast(`Settlement verification failed: ${result.error}. Balance for A.B-${sampleId} remains outstanding. Ref: ${reference}`, 'error');
+      toast(`Settlement verification failed: ${result.error}. Balance for MU-${sampleId} remains outstanding. Ref: ${reference}`, 'error');
       if (btn) btn.disabled = false;
       return;
     }
 
     document.getElementById('settle-sample-id').value = '';
     document.getElementById('settleResultBox').style.display = 'none';
-    toast(`✓ A.B-${sampleId} balance settled – marked as Paid`);
+    toast(`✓ MU-${sampleId} balance settled – marked as Paid`);
     if (btn) btn.disabled = false;
   }
 
@@ -714,7 +897,7 @@
     .then(() => {
       document.getElementById('settle-sample-id').value = '';
       document.getElementById('settleResultBox').style.display = 'none';
-      toast(`✓ A.B-${sampleId} balance settled – marked as Paid`);
+      toast(`✓ MU-${sampleId} balance settled – marked as Paid`);
     })
     .catch(err => { toast('Settlement update failed: ' + err.message, 'error'); if(btn) btn.disabled = false; });
   }
@@ -969,7 +1152,7 @@
 
       await addAudit('Rejection Resolved', sampleId,
         `Resolved by reception — rejected tests set to Processing${hasDoneTests ? '; previously Done tests preserved as Ready' : ''}`);
-      toast(`✓ A.B-${sampleId} resolved — now available for result entry`);
+      toast(`✓ MU-${sampleId} resolved — now available for result entry`);
 
       await loadRejectedSamples(); // refresh from DB
     } catch (err) {
@@ -1011,11 +1194,11 @@
     content.innerHTML = `
       <div style="text-align:left;">
         <canvas id="receiptBarcode" style="display:block;margin:0 auto 12px;"></canvas>
-        <h3 style="color:#1F6E43;">AB DAWANAU</h3>
+        <h3 style="color:#1F6E43;">MU'UJIZA DIAGNOSTICS</h3>
         <p>Laboratory Information System</p>
         ${paidBanner}
         <p><strong>Receipt No:</strong> ${esc(sample.receiptNo)}</p>
-        <p><strong>Sample ID:</strong> A.B-${sample.id}</p>
+        <p><strong>Sample ID:</strong> MU-${sample.id}</p>
         ${paystackRefLine}
         <p><strong>Patient:</strong> ${esc(sample.patient)}</p>
         <p><strong>Priority:</strong> ${esc(sample.priority)}</p>
@@ -1059,10 +1242,10 @@
       <div style="text-align:left;">
         <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:10px;margin-bottom:16px;">
           <i class="fas fa-exclamation-triangle"></i> <strong>Offline Draft</strong><br>
-          Will sync and get a real A.B-ID when internet returns.
+          Will sync and get a real MU-ID when internet returns.
         </div>
         <canvas id="receiptBarcode" style="display:block;margin:0 auto 12px;"></canvas>
-        <h3 style="color:#1F6E43;">A.B DAWANAU MEDICAL LABORATORY SERVICES</h3>
+        <h3 style="color:#1F6E43;">MU'UJIZA DIAGNOSTICS</h3>
         <p>Offline Registration Receipt</p>
         <div style="background:#f0f4ff;border:1px solid #c7d2fe;border-radius:10px;padding:10px;margin-bottom:14px;">
           <strong>Draft Reference:</strong> <span style="font-family:monospace;">${esc(sample.receiptNo)}</span>
