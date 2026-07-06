@@ -235,6 +235,31 @@ async function attemptLogin() {
       p_password: password
     });
 
+    // Subscription-expired is a distinct, deliberate error raised by the RPC —
+    // handle it separately so we don't show "wrong password" and don't count
+    // it against the user's failed-attempt lockout.
+    if (rpcError && rpcError.message && rpcError.message.includes('SUBSCRIPTION_EXPIRED')) {
+      sbInsert('audit_log', {
+        ts: new Date().toISOString(),
+        user_name:  username,
+        user_role:  selectedRole,
+        action:     'Blocked Login',
+        details:    `Subscription expired — login denied | IP: ${_clientIP}`
+      });
+
+      sbInsert('ip_access_log', {
+        ip_address:   _clientIP,
+        username:     username.toLowerCase(),
+        action:       'failed_login',
+        user_agent:   navigator.userAgent.substring(0, 200),
+        attempted_at: new Date().toISOString(),
+        success:      false,
+        fail_reason:  'Subscription expired'
+      });
+
+      throw new Error('Subscription expired. Please contact your admin to renew access.');
+    }
+
     if (rpcError || !authResult || authResult.length === 0) {
       const d = recordFailure(ukey);
       updateAttemptBar(ukey);
@@ -280,10 +305,11 @@ async function attemptLogin() {
 
     clearAttempts(ukey);
 
-    // session_token comes from the patched authenticate_user RPC.
+    // token comes from the authenticate_user RPC (column is named "token",
+    // not "session_token" — do not rename without also updating the RPC).
     // Stored in sessionStorage and sent as x-lis-token on every
     // subsequent Supabase request so RLS policies can validate the caller.
-    const sessionToken = user.session_token || null;
+    const sessionToken = user.token || null;
 
     // Session fields — id, role, token, expiresAt required by auth-guard.js
     const sessionPayload = {
