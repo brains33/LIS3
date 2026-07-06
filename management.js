@@ -713,12 +713,17 @@ async function verifySubscriptionPayment(reference, plan, amount, email) {
     try {
         // Call the LIS subscription webhook edge function to verify
         const resp = await fetch(
-            `${window._supabaseUrl}/functions/v1/lis-subscription-webhook`,
+            window.LIS_CONFIG.SUBS_FUNCTION_URL,
             {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-lis-token': sessionStorage.getItem('lisToken') || ''
+                    'x-lis-token': (() => {
+                        try {
+                            const s = sessionStorage.getItem('muujiza_session');
+                            return s ? JSON.parse(s).token : '';
+                        } catch { return ''; }
+                    })()
                 },
                 body: JSON.stringify({ action: 'verify-subscription', reference, plan, amount, email })
             }
